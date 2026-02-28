@@ -382,6 +382,8 @@ Deno.serve(async (req) => {
     const slackSignature = req.headers.get("x-slack-signature") || "";
     const contentType = req.headers.get("content-type") || "";
 
+    console.log("Incoming request:", { contentType, hasTimestamp: !!timestamp, hasSignature: !!slackSignature, bodyLength: bodyText.length });
+
     // Handle interactive payloads (URL-encoded form data from button clicks)
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const params = new URLSearchParams(bodyText);
@@ -394,6 +396,7 @@ Deno.serve(async (req) => {
     }
 
     const payload = JSON.parse(bodyText);
+    console.log("Parsed payload type:", payload.type, "event type:", payload.event?.type);
 
     // Handle Slack URL verification challenge
     if (payload.type === "url_verification") {
@@ -405,9 +408,10 @@ Deno.serve(async (req) => {
     // Verify Slack signature
     const valid = await verifySlackSignature(bodyText, timestamp, slackSignature);
     if (!valid) {
-      console.error("Invalid Slack signature");
+      console.error("Invalid Slack signature - timestamp:", timestamp, "signature:", slackSignature);
       return new Response("Unauthorized", { status: 401 });
     }
+    console.log("Signature verified OK");
 
     // Handle event callbacks
     if (payload.type === "event_callback") {
