@@ -262,8 +262,13 @@ const Setup = () => {
         <h1 className="text-4xl font-bold tracking-tight mb-3">
           Self-Host Setup Guide
         </h1>
-        <p className="text-lg text-muted-foreground mb-12 leading-relaxed">
+        <p className="text-lg text-muted-foreground mb-4 leading-relaxed">
           Remix this project on Lovable and follow these steps to get your own Slack PDF Signature Bot running. No private keys or secrets are stored in the codebase — everything sensitive goes into Lovable Cloud secrets.
+        </p>
+        <p className="text-muted-foreground mb-12">
+          <a href="https://github.com/High-Tower80/slack-signer-bot" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-primary hover:underline font-medium">
+            View source on GitHub →
+          </a>
         </p>
 
         <div className="space-y-10">
