@@ -8,6 +8,10 @@ Sign PDFs without leaving Slack. Save your signature once, drop in a PDF, get it
 2. **Send a PDF** in the same DM — bot returns it signed in seconds
 3. **Adjust with plain English** — "make it bigger", "page 2 top left", "try again smaller"
 4. **Use the shortcut** — click ⋮ on any PDF in a channel → "Sign PDF"
+   
+<img width="696" height="641" alt="SCR-20260228-dgyd" src="https://github.com/user-attachments/assets/72e9f9e9-a295-4d96-86e8-7824089b2cd3" />
+<img width="549" height="339" alt="SCR-20260228-djqw" src="https://github.com/user-attachments/assets/1bb5c7b9-5657-44fc-b807-4713bee80131" />
+<img width="558" height="365" alt="SCR-20260228-dkoo" src="https://github.com/user-attachments/assets/350cbeb5-a19f-488f-a9e2-1d48bdfc9523" />
 
 ## Features
 
