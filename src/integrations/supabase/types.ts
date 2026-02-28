@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      last_signed_pdfs: {
+        Row: {
+          channel: string
+          created_at: string
+          file_name: string
+          id: string
+          pdf_url: string
+          slack_user_id: string
+          thread_ts: string | null
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          file_name?: string
+          id?: string
+          pdf_url: string
+          slack_user_id: string
+          thread_ts?: string | null
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          file_name?: string
+          id?: string
+          pdf_url?: string
+          slack_user_id?: string
+          thread_ts?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       signatures: {
         Row: {
           created_at: string
