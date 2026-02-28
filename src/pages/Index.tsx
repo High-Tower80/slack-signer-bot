@@ -1,25 +1,76 @@
-import { FileText, Upload, PenTool, CheckCircle, MessageSquare } from "lucide-react";
+import { FileText, Upload, PenTool, CheckCircle, MessageSquare, Zap, Shield, RefreshCw, HelpCircle, Settings } from "lucide-react";
 
 const steps = [
   {
     icon: <MessageSquare className="h-8 w-8" />,
     title: "1. DM the Bot",
-    description: "Open a direct message with the Signature Bot in Slack.",
+    description: "Open a direct message with the Signature Bot in Slack. Find it in your workspace's app list or search for it in the sidebar.",
   },
   {
     icon: <PenTool className="h-8 w-8" />,
     title: "2. Upload Your Signature",
-    description: "Send a PNG or JPG image of your signature. The bot saves it for you.",
+    description: "Send a PNG or JPG image of your signature. The bot securely stores it and confirms it's ready to use. You only need to do this once.",
   },
   {
     icon: <Upload className="h-8 w-8" />,
     title: "3. Upload a PDF",
-    description: "Send any PDF document you need signed.",
+    description: "Drag and drop any PDF document into the DM. The bot automatically detects signature fields or places your signature at the bottom of the first page.",
   },
   {
     icon: <CheckCircle className="h-8 w-8" />,
     title: "4. Get Your Signed PDF",
-    description: "The bot applies your signature and sends back the signed document.",
+    description: "Within seconds, the bot replies with your signed PDF as a downloadable file — ready to share, send, or archive.",
+  },
+];
+
+const features = [
+  {
+    icon: <Zap className="h-6 w-6" />,
+    title: "Instant Signing",
+    description: "PDFs are processed and returned in seconds. No waiting, no queues.",
+  },
+  {
+    icon: <Shield className="h-6 w-6" />,
+    title: "Secure & Private",
+    description: "Your signature and documents stay within your Slack workspace. Nothing is shared externally.",
+  },
+  {
+    icon: <RefreshCw className="h-6 w-6" />,
+    title: "Update Anytime",
+    description: "Changed your signature? Simply send a new image and the bot replaces the old one instantly.",
+  },
+  {
+    icon: <HelpCircle className="h-6 w-6" />,
+    title: "Smart Detection",
+    description: "The bot scans for signature fields in your PDF. If none are found, it places the signature in a clean spot on the first page.",
+  },
+];
+
+const gettingStartedSteps = [
+  {
+    step: "1",
+    title: "Install the Bot",
+    description: "An admin in your Slack workspace needs to install the Signature Bot app. Once installed, it's available to everyone in the workspace.",
+  },
+  {
+    step: "2",
+    title: "Open a DM",
+    description: "Navigate to the Apps section in your Slack sidebar and click on Signature Bot to open a direct message conversation.",
+  },
+  {
+    step: "3",
+    title: "Save Your Signature",
+    description: "Take a photo of your signature on white paper, or use any drawing tool to create a digital signature. Save it as a PNG or JPG file, then send it to the bot. You'll see a confirmation message: \"✅ Signature saved!\"",
+  },
+  {
+    step: "4",
+    title: "Sign Your First PDF",
+    description: "Upload any PDF document to the DM. The bot will process it, apply your signature, and send back the signed version as a downloadable file within seconds.",
+  },
+  {
+    step: "5",
+    title: "Share & Repeat",
+    description: "Download the signed PDF and share it however you need — email, Slack channels, cloud storage. Your signature stays saved, so next time just upload another PDF.",
   },
 ];
 
@@ -34,14 +85,13 @@ const Index = () => {
         <h1 className="mb-4 text-5xl font-bold tracking-tight">
           Slack PDF Signature Bot
         </h1>
-        <p className="max-w-xl text-lg text-muted-foreground">
-          Sign PDFs without leaving Slack. Save your signature once, then upload
-          any PDF to get it signed instantly — all in a DM.
+        <p className="max-w-2xl text-lg text-muted-foreground leading-relaxed">
+          Stop switching between apps to sign documents. The Slack PDF Signature Bot lets you save your personal signature once and apply it to any PDF — all without leaving Slack. Just open a DM, upload your document, and get your signed PDF back in seconds. It's the fastest, simplest way to handle document signing for individuals and teams.
         </p>
       </header>
 
       {/* How it works */}
-      <section className="mx-auto max-w-4xl px-6 pb-24">
+      <section className="mx-auto max-w-4xl px-6 pb-20">
         <h2 className="mb-12 text-center text-3xl font-semibold">
           How It Works
         </h2>
@@ -56,6 +106,80 @@ const Index = () => {
               <p className="text-muted-foreground">{step.description}</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Features */}
+      <section className="border-t border-border bg-muted/30 py-20">
+        <div className="mx-auto max-w-4xl px-6">
+          <h2 className="mb-12 text-center text-3xl font-semibold">
+            Why Use Signature Bot?
+          </h2>
+          <div className="grid gap-6 sm:grid-cols-2">
+            {features.map((feature) => (
+              <div key={feature.title} className="flex gap-4">
+                <div className="mt-1 text-primary">{feature.icon}</div>
+                <div>
+                  <h3 className="mb-1 font-semibold">{feature.title}</h3>
+                  <p className="text-sm text-muted-foreground">{feature.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Getting Started */}
+      <section className="mx-auto max-w-3xl px-6 py-20">
+        <h2 className="mb-4 text-center text-3xl font-semibold">
+          Getting Started
+        </h2>
+        <p className="mb-12 text-center text-muted-foreground">
+          Follow these steps to start signing PDFs in under two minutes.
+        </p>
+        <div className="space-y-8">
+          {gettingStartedSteps.map((item) => (
+            <div key={item.step} className="flex gap-5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-lg">
+                {item.step}
+              </div>
+              <div>
+                <h3 className="mb-1 text-lg font-semibold">{item.title}</h3>
+                <p className="text-muted-foreground">{item.description}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section className="border-t border-border bg-muted/30 py-20">
+        <div className="mx-auto max-w-3xl px-6">
+          <h2 className="mb-12 text-center text-3xl font-semibold">
+            Frequently Asked Questions
+          </h2>
+          <div className="space-y-6">
+            <div>
+              <h3 className="mb-1 font-semibold">What file formats are supported for signatures?</h3>
+              <p className="text-muted-foreground">PNG and JPG images. For best results, use a signature on a white background with clear contrast.</p>
+            </div>
+            <div>
+              <h3 className="mb-1 font-semibold">Can I update my signature?</h3>
+              <p className="text-muted-foreground">Yes! Simply send a new signature image to the bot and it will automatically replace the previous one.</p>
+            </div>
+            <div>
+              <h3 className="mb-1 font-semibold">Where does the signature get placed on the PDF?</h3>
+              <p className="text-muted-foreground">The bot looks for signature fields or lines in the document first. If none are found, it places the signature at the bottom of the first page in available white space.</p>
+            </div>
+            <div>
+              <h3 className="mb-1 font-semibold">Is my data secure?</h3>
+              <p className="text-muted-foreground">Absolutely. Your signature image and documents are processed securely and stored within the bot's private infrastructure. They are never shared with third parties.</p>
+            </div>
+            <div>
+              <h3 className="mb-1 font-semibold">Can multiple people in my workspace use the bot?</h3>
+              <p className="text-muted-foreground">Yes — each user saves their own signature independently. The bot keeps signatures separate per user.</p>
+            </div>
+          </div>
         </div>
       </section>
 
