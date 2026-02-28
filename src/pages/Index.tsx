@@ -15,7 +15,7 @@ const steps = [
   {
     icon: <Upload className="h-8 w-8" />,
     title: "3. Upload a PDF",
-    description: "Drag and drop any PDF document into the DM — or use the 3-dot menu shortcut on any message with a PDF attachment.",
+    description: "Drag and drop one or more PDFs into the DM — the bot signs them all. You can also use the 3-dot menu shortcut on any message with PDF attachments.",
   },
   {
     icon: <CheckCircle className="h-8 w-8" />,
@@ -59,6 +59,11 @@ const features = [
     icon: <Move className="h-6 w-6" />,
     title: "Flexible Placement",
     description: "Choose from 7 positions (top/bottom × left/center/right + center) across any page, with 4 size options from small to extra large.",
+  },
+  {
+    icon: <FileText className="h-6 w-6" />,
+    title: "Batch Signing",
+    description: "Upload multiple PDFs at once and the bot signs them all in one go. Great for processing a stack of documents quickly.",
   },
 ];
 
