@@ -262,9 +262,20 @@ async function signPdf(
 function isImage(mimetype: string): boolean { return mimetype.startsWith("image/"); }
 function isPdf(mimetype: string): boolean { return mimetype === "application/pdf"; }
 
-// ─── Last-signed PDF cache (per user, in-memory) ───────────────────
-// Stores the original PDF bytes so users can say "try again bigger"
-const lastSignedPdfs = new Map<string, { pdfBytes: Uint8Array; fileName: string; channel: string; threadTs?: string }>();
+// ─── Last-signed PDF persistence (DB-backed) ──────────────────────
+async function cacheLastPdf(userId: string, pdfUrl: string, fileName: string, channel: string, threadTs?: string) {
+  await supabase.from("last_signed_pdfs").upsert(
+    { slack_user_id: userId, pdf_url: pdfUrl, file_name: fileName, channel, thread_ts: threadTs || null },
+    { onConflict: "slack_user_id" }
+  );
+}
+
+async function getLastPdf(userId: string) {
+  const { data } = await supabase
+    .from("last_signed_pdfs").select("*")
+    .eq("slack_user_id", userId).maybeSingle();
+  return data;
+}
 
 // ─── Home Tab ──────────────────────────────────────────────────────
 async function publishHomeTab(userId: string) {
@@ -346,8 +357,8 @@ async function handleMessageShortcut(payload: any) {
     try {
       const pdfData = await downloadSlackFile(file.url_private);
 
-      // Cache original PDF for follow-up adjustments
-      lastSignedPdfs.set(userId, { pdfBytes: pdfData, fileName: file.name || "document.pdf", channel, threadTs });
+      // Cache original PDF URL for follow-up adjustments
+      await cacheLastPdf(userId, file.url_private, file.name || "document.pdf", channel, threadTs);
 
       const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
       const signedFilename = `signed_${file.name || "document.pdf"}`;
@@ -489,7 +500,7 @@ Deno.serve(async (req) => {
 
               try {
                 const pdfData = await downloadSlackFile(file.url_private);
-                lastSignedPdfs.set(userId, { pdfBytes: pdfData, fileName: file.name || "document.pdf", channel });
+                await cacheLastPdf(userId, file.url_private, file.name || "document.pdf", channel);
 
                 const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
                 const signedFilename = `signed_${file.name || "document.pdf"}`;
@@ -509,7 +520,7 @@ Deno.serve(async (req) => {
           const text = event.text.trim();
 
           // Check if user has a cached PDF to re-sign
-          const cached = lastSignedPdfs.get(userId);
+          const cached = await getLastPdf(userId);
           if (cached && looksLikeAdjustment(text)) {
             const signatureData = await getSignature(userId);
             if (!signatureData) {
@@ -517,8 +528,16 @@ Deno.serve(async (req) => {
               return new Response("ok", { headers: corsHeaders });
             }
 
-            // Count pages for AI context
-            const tempDoc = await PDFDocument.load(cached.pdfBytes);
+            // Re-download the original PDF from Slack
+            let pdfBytes: Uint8Array;
+            try {
+              pdfBytes = await downloadSlackFile(cached.pdf_url);
+            } catch {
+              await sendSlackMessage(channel, "⚠️ Could not retrieve the original PDF. Please upload it again.");
+              return new Response("ok", { headers: corsHeaders });
+            }
+
+            const tempDoc = await PDFDocument.load(pdfBytes);
             const totalPages = tempDoc.getPageCount();
 
             await sendSlackMessage(channel, "🔄 Adjusting placement...");
@@ -530,14 +549,14 @@ Deno.serve(async (req) => {
             }
 
             try {
-              const signedPdf = await signPdf(cached.pdfBytes, signatureData, options);
-              const signedFilename = `signed_${cached.fileName}`;
+              const signedPdf = await signPdf(pdfBytes, signatureData, options);
+              const signedFilename = `signed_${cached.file_name}`;
 
               const posLabel = options.position.replace("-", " ");
-              const pageLabel = options.page === tempDoc.getPageCount() - 1 && totalPages > 1 ? "last page" : `page ${options.page + 1}`;
+              const pageLabel = options.page === totalPages - 1 && totalPages > 1 ? "last page" : `page ${options.page + 1}`;
               const sizeLabel = options.scale;
 
-              await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${cached.fileName}`, cached.threadTs);
+              await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${cached.file_name}`, cached.thread_ts || undefined);
               await sendSlackMessage(channel, `✅ Re-signed — ${sizeLabel} signature, ${posLabel}, ${pageLabel}. Tell me to adjust again or upload a new PDF!`);
             } catch (err) {
               console.error("Re-sign error:", err);
