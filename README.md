@@ -18,6 +18,7 @@ Sign PDFs without leaving Slack. Save your signature once, drop in a PDF, get it
 - 📍 7 placement positions × 4 sizes across any page
 - 🔄 Update your signature anytime
 - 📎 Works in DMs and channels (via message shortcut)
+- 📄 Batch signing — upload multiple PDFs at once and get them all signed
 
 ## Tech Stack
 
