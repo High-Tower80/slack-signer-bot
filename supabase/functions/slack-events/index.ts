@@ -133,7 +133,7 @@ async function uploadSlackFile(
     throw new Error("Failed to get upload URL");
   }
 
-  await fetch(uploadData.upload_url, { method: "POST", body: fileData });
+  await fetch(uploadData.upload_url, { method: "POST", body: fileData.buffer as ArrayBuffer });
 
   const completeBody: Record<string, unknown> = {
     files: [{ id: uploadData.file_id, title }],
@@ -157,7 +157,7 @@ async function uploadSlackFile(
 
 // ─── Image processing ──────────────────────────────────────────────
 function removeBackground(imageData: Uint8Array): Uint8Array {
-  const img = UPNG.decode(imageData);
+  const img = UPNG.decode(imageData.buffer as ArrayBuffer);
   const rgba = new Uint8Array(UPNG.toRGBA8(img)[0]);
   const threshold = 230;
   for (let i = 0; i < rgba.length; i += 4) {
