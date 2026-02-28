@@ -16,6 +16,13 @@ const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+const processedEventIds = new Set<string>();
+const MAX_EVENT_CACHE = 1000;
+
+const VALID_POSITIONS = new Set(["bottom-right", "bottom-left", "bottom-center", "top-right", "top-left", "top-center", "center"]);
+const VALID_SCALES = new Set(["small", "medium", "large", "xlarge"]);
+
 // ─── Placement types ───────────────────────────────────────────────
 interface SigningOptions {
   page: number; // 0-indexed, -1 = last page
@@ -90,8 +97,20 @@ async function downloadSlackFile(url: string): Promise<Uint8Array> {
       throw new Error(`Slack file download failed: ${res.status} ${res.statusText}`);
     }
 
+    // Check file size before downloading
+    const contentLength = res.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
+      await res.body?.cancel();
+      throw new Error(`File exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit`);
+    }
+
     const contentType = res.headers.get("content-type") || "";
     const bytes = new Uint8Array(await res.arrayBuffer());
+
+    // Double-check actual size
+    if (bytes.length > MAX_FILE_SIZE) {
+      throw new Error(`File exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit`);
+    }
 
     // Detect if Slack returned an HTML page instead of the actual file
     if (contentType.includes("text/html") || (bytes.length > 4 && bytes[0] === 0x3C)) {
@@ -250,10 +269,13 @@ Return ONLY the JSON, no markdown, no explanation.`,
     const pageNum = parsed.page === "last" ? -1 : (parseInt(parsed.page) || 1) - 1;
     const clampedPage = pageNum === -1 ? totalPages - 1 : Math.max(0, Math.min(pageNum, totalPages - 1));
 
+    const position = VALID_POSITIONS.has(parsed.position) ? parsed.position : "bottom-right";
+    const scale = VALID_SCALES.has(parsed.scale) ? parsed.scale : "large";
+
     return {
       page: clampedPage,
-      position: parsed.position || "bottom-right",
-      scale: parsed.scale || "large",
+      position,
+      scale,
     };
   } catch (err) {
     console.error("AI parsing error:", err);
@@ -476,6 +498,11 @@ Deno.serve(async (req) => {
     const slackSignature = req.headers.get("x-slack-signature") || "";
     const contentType = req.headers.get("content-type") || "";
 
+    // Reject oversized request bodies (1MB limit for Slack payloads)
+    if (bodyText.length > 1024 * 1024) {
+      return new Response("Payload too large", { status: 413, headers: corsHeaders });
+    }
+
     console.log("Incoming request:", { contentType, hasTimestamp: !!timestamp, hasSignature: !!slackSignature, bodyLength: bodyText.length });
 
     // Handle interactive payloads (URL-encoded form data)
@@ -518,8 +545,20 @@ Deno.serve(async (req) => {
     if (payload.type === "event_callback") {
       const event = payload.event;
 
-      // Deduplicate: Slack retries if we take >3s. Use event_id to detect retries.
+      // Deduplicate: Slack retries if we take >3s
       const eventId = payload.event_id;
+      if (eventId && processedEventIds.has(eventId)) {
+        console.log("Duplicate event, skipping:", eventId);
+        return new Response("ok", { headers: corsHeaders });
+      }
+      if (eventId) {
+        processedEventIds.add(eventId);
+        // Evict oldest entries if cache grows too large
+        if (processedEventIds.size > MAX_EVENT_CACHE) {
+          const first = processedEventIds.values().next().value;
+          if (first) processedEventIds.delete(first);
+        }
+      }
 
       if (event.type === "app_home_opened" && event.tab === "home") {
         await publishHomeTab(event.user);
