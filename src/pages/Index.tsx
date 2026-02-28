@@ -106,7 +106,7 @@ const Index = () => {
           Slack PDF Signature Bot
         </h1>
         <p className="max-w-2xl text-lg text-muted-foreground leading-relaxed">
-          Sign PDFs without leaving Slack. Save your signature once, upload a document, and get it signed in seconds — right in a DM or from any channel using the 3-dot menu shortcut. Need a different placement? Just tell the bot in plain English.
+          Signing PDFs shouldn't mean leaving Slack, downloading files, opening another app, and re-uploading. For teams that live in Slack — sales, legal, HR, ops — this bot eliminates the friction. Save your signature once, drop in a PDF, and get it back signed in seconds. All without switching a single tab.
         </p>
       </header>
 
