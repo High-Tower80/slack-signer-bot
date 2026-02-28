@@ -1,4 +1,5 @@
-import { FileText, Upload, PenTool, CheckCircle, MessageSquare, Zap, Shield, RefreshCw, MousePointerClick, Move, Brain, ImageOff } from "lucide-react";
+import { FileText, Upload, PenTool, CheckCircle, MessageSquare, Zap, Shield, RefreshCw, MousePointerClick, Move, Brain, ImageOff, Wrench } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const steps = [
   {
@@ -212,8 +213,14 @@ const Index = () => {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground">
-        Slack PDF Signature Bot &middot; All signing happens securely in your Slack workspace.
+      <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground space-y-2">
+        <p>Slack PDF Signature Bot &middot; All signing happens securely in your Slack workspace.</p>
+        <p>
+          <Link to="/setup" className="inline-flex items-center gap-1.5 text-primary hover:underline">
+            <Wrench className="h-3.5 w-3.5" />
+            Self-host setup guide
+          </Link>
+        </p>
       </footer>
     </div>
   );
