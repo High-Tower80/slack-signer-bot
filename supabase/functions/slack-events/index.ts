@@ -26,7 +26,7 @@ interface SigningOptions {
 const DEFAULT_OPTIONS: SigningOptions = {
   page: 0,
   position: "bottom-right",
-  scale: "large",
+  scale: "xlarge",
 };
 
 const SCALE_MAP: Record<string, { maxWidth: number; maxHeight: number }> = {
@@ -472,6 +472,9 @@ Deno.serve(async (req) => {
     if (payload.type === "event_callback") {
       const event = payload.event;
 
+      // Deduplicate: Slack retries if we take >3s. Use event_id to detect retries.
+      const eventId = payload.event_id;
+
       if (event.type === "app_home_opened" && event.tab === "home") {
         await publishHomeTab(event.user);
         return new Response("ok", { headers: corsHeaders });
@@ -482,100 +485,110 @@ Deno.serve(async (req) => {
       }
 
       if (event.type === "message") {
-        const channel = event.channel;
-        const userId = event.user;
+        // Return immediately, process in background to avoid Slack retries
+        const bgWork = (async () => {
+          const channel = event.channel;
+          const userId = event.user;
 
-        // Handle file uploads
-        if (event.files && event.files.length > 0) {
-          for (const file of event.files) {
-            const mimetype = file.mimetype || "";
+          // Handle file uploads
+          if (event.files && event.files.length > 0) {
+            for (const file of event.files) {
+              const mimetype = file.mimetype || "";
 
-            if (isImage(mimetype)) {
-              const existingSig = await getSignature(userId);
-              const fileData = await downloadSlackFile(file.url_private_download || file.url_private);
-              const saved = await saveSignature(userId, fileData, mimetype);
-              if (saved) {
-                const msg = existingSig
-                  ? "✅ Signature updated! Your new signature will be used for future PDFs."
-                  : "✅ Signature saved! Upload a PDF anytime to sign it.";
-                await sendSlackMessage(channel, msg);
-                await publishHomeTab(userId);
+              if (isImage(mimetype)) {
+                const existingSig = await getSignature(userId);
+                const fileData = await downloadSlackFile(file.url_private_download || file.url_private);
+                const saved = await saveSignature(userId, fileData, mimetype);
+                if (saved) {
+                  const msg = existingSig
+                    ? "✅ Signature updated! Your new signature will be used for future PDFs."
+                    : "✅ Signature saved! Upload a PDF anytime to sign it.";
+                  await sendSlackMessage(channel, msg);
+                  await publishHomeTab(userId);
+                } else {
+                  await sendSlackMessage(channel, "❌ Failed to save signature. Please try again.");
+                }
+              } else if (isPdf(mimetype)) {
+                const signatureData = await getSignature(userId);
+                if (!signatureData) {
+                  await sendSlackMessage(channel, "⚠️ Please send me your signature image first! Upload a PNG or JPG of your signature.");
+                  continue;
+                }
+
+                try {
+                  const pdfData = await downloadSlackFile(file.url_private_download || file.url_private);
+                  await cacheLastPdf(userId, file.url_private_download || file.url_private, file.name || "document.pdf", channel);
+
+                  const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
+                  const signedFilename = `signed_${file.name || "document.pdf"}`;
+                  await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${file.title || file.name || "document.pdf"}`);
+                  await sendSlackMessage(channel, '✅ Signed! Want to adjust? Just tell me — e.g. "make it bigger", "page 2 bottom left", or "try again smaller"');
+                } catch (err) {
+                  console.error("PDF signing error:", err);
+                  await sendSlackMessage(channel, `❌ Failed to sign "${file.name || "PDF"}". Please make sure it's a valid PDF file.`);
+                }
               } else {
-                await sendSlackMessage(channel, "❌ Failed to save signature. Please try again.");
+                await sendSlackMessage(channel, "I can only process image files (for signatures) and PDF files (for signing). Please upload a PNG/JPG signature or a PDF to sign.");
               }
-            } else if (isPdf(mimetype)) {
+            }
+          }
+          // Handle text-only messages (adjustment commands)
+          else if (event.text && !event.files) {
+            const text = event.text.trim();
+
+            // Check if user has a cached PDF to re-sign
+            const cached = await getLastPdf(userId);
+            if (cached && looksLikeAdjustment(text)) {
               const signatureData = await getSignature(userId);
               if (!signatureData) {
-                await sendSlackMessage(channel, "⚠️ Please send me your signature image first! Upload a PNG or JPG of your signature.");
-                continue;
+                await sendSlackMessage(channel, "⚠️ No signature found. Please upload one first.");
+                return;
+              }
+
+              // Re-download the original PDF from Slack
+              let pdfBytes: Uint8Array;
+              try {
+                pdfBytes = await downloadSlackFile(cached.pdf_url);
+              } catch {
+                await sendSlackMessage(channel, "⚠️ Could not retrieve the original PDF. Please upload it again.");
+                return;
+              }
+
+              const tempDoc = await PDFDocument.load(pdfBytes);
+              const totalPages = tempDoc.getPageCount();
+
+              await sendSlackMessage(channel, "🔄 Adjusting placement...");
+
+              const options = await parseSigningInstruction(text, totalPages);
+              if (!options) {
+                await sendSlackMessage(channel, '❌ I couldn\'t understand that. Try something like "bigger, top left" or "page 2 bottom center".');
+                return;
               }
 
               try {
-                const pdfData = await downloadSlackFile(file.url_private_download || file.url_private);
-                await cacheLastPdf(userId, file.url_private_download || file.url_private, file.name || "document.pdf", channel);
+                const signedPdf = await signPdf(pdfBytes, signatureData, options);
+                const signedFilename = `signed_${cached.file_name}`;
 
-                const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
-                const signedFilename = `signed_${file.name || "document.pdf"}`;
-                await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${file.title || file.name || "document.pdf"}`);
-                await sendSlackMessage(channel, '✅ Signed! Want to adjust? Just tell me — e.g. "make it bigger", "page 2 bottom left", or "try again smaller"');
+                const posLabel = options.position.replace("-", " ");
+                const pageLabel = options.page === totalPages - 1 && totalPages > 1 ? "last page" : `page ${options.page + 1}`;
+                const sizeLabel = options.scale;
+
+                await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${cached.file_name}`, cached.thread_ts || undefined);
+                await sendSlackMessage(channel, `✅ Re-signed — ${sizeLabel} signature, ${posLabel}, ${pageLabel}. Tell me to adjust again or upload a new PDF!`);
               } catch (err) {
-                console.error("PDF signing error:", err);
-                await sendSlackMessage(channel, `❌ Failed to sign "${file.name || "PDF"}". Please make sure it's a valid PDF file.`);
+                console.error("Re-sign error:", err);
+                await sendSlackMessage(channel, "❌ Failed to re-sign. Please try uploading the PDF again.");
               }
-            } else {
-              await sendSlackMessage(channel, "I can only process image files (for signatures) and PDF files (for signing). Please upload a PNG/JPG signature or a PDF to sign.");
             }
           }
+        })().catch((err) => console.error("Event processing error:", err));
+
+        // @ts-ignore - Deno Deploy / Supabase Edge Runtime global
+        if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+          // @ts-ignore
+          EdgeRuntime.waitUntil(bgWork);
         }
-        // Handle text-only messages (adjustment commands)
-        else if (event.text && !event.files) {
-          const text = event.text.trim();
-
-          // Check if user has a cached PDF to re-sign
-          const cached = await getLastPdf(userId);
-          if (cached && looksLikeAdjustment(text)) {
-            const signatureData = await getSignature(userId);
-            if (!signatureData) {
-              await sendSlackMessage(channel, "⚠️ No signature found. Please upload one first.");
-              return new Response("ok", { headers: corsHeaders });
-            }
-
-            // Re-download the original PDF from Slack
-            let pdfBytes: Uint8Array;
-            try {
-              pdfBytes = await downloadSlackFile(cached.pdf_url);
-            } catch {
-              await sendSlackMessage(channel, "⚠️ Could not retrieve the original PDF. Please upload it again.");
-              return new Response("ok", { headers: corsHeaders });
-            }
-
-            const tempDoc = await PDFDocument.load(pdfBytes);
-            const totalPages = tempDoc.getPageCount();
-
-            await sendSlackMessage(channel, "🔄 Adjusting placement...");
-
-            const options = await parseSigningInstruction(text, totalPages);
-            if (!options) {
-              await sendSlackMessage(channel, '❌ I couldn\'t understand that. Try something like "bigger, top left" or "page 2 bottom center".');
-              return new Response("ok", { headers: corsHeaders });
-            }
-
-            try {
-              const signedPdf = await signPdf(pdfBytes, signatureData, options);
-              const signedFilename = `signed_${cached.file_name}`;
-
-              const posLabel = options.position.replace("-", " ");
-              const pageLabel = options.page === totalPages - 1 && totalPages > 1 ? "last page" : `page ${options.page + 1}`;
-              const sizeLabel = options.scale;
-
-              await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${cached.file_name}`, cached.thread_ts || undefined);
-              await sendSlackMessage(channel, `✅ Re-signed — ${sizeLabel} signature, ${posLabel}, ${pageLabel}. Tell me to adjust again or upload a new PDF!`);
-            } catch (err) {
-              console.error("Re-sign error:", err);
-              await sendSlackMessage(channel, "❌ Failed to re-sign. Please try uploading the PDF again.");
-            }
-          }
-        }
+        return new Response("ok", { headers: corsHeaders });
       }
     }
 
