@@ -53,10 +53,22 @@ async function verifySlackSignature(
 }
 
 async function downloadSlackFile(url: string): Promise<Uint8Array> {
+  // Prefer url_private_download; if caller passed url_private, append ?t= won't help,
+  // but the Authorization header should still work for url_private on newer Slack APIs.
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
   });
-  return new Uint8Array(await res.arrayBuffer());
+  if (!res.ok) {
+    throw new Error(`Slack file download failed: ${res.status} ${res.statusText}`);
+  }
+  const contentType = res.headers.get("content-type") || "";
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // Detect if Slack returned an HTML page instead of the actual file
+  if (contentType.includes("text/html") || (bytes.length > 4 && bytes[0] === 0x3C)) {
+    console.error("Slack returned HTML instead of file. Content-Type:", contentType, "URL:", url);
+    throw new Error("Slack returned HTML instead of file data. The file URL may have expired or the bot lacks files:read scope.");
+  }
+  return bytes;
 }
 
 async function sendSlackMessage(channel: string, text: string, threadTs?: string) {
@@ -355,10 +367,10 @@ async function handleMessageShortcut(payload: any) {
 
   for (const file of pdfFiles) {
     try {
-      const pdfData = await downloadSlackFile(file.url_private);
+      const pdfData = await downloadSlackFile(file.url_private_download || file.url_private);
 
       // Cache original PDF URL for follow-up adjustments
-      await cacheLastPdf(userId, file.url_private, file.name || "document.pdf", channel, threadTs);
+      await cacheLastPdf(userId, file.url_private_download || file.url_private, file.name || "document.pdf", channel, threadTs);
 
       const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
       const signedFilename = `signed_${file.name || "document.pdf"}`;
@@ -480,7 +492,7 @@ Deno.serve(async (req) => {
 
             if (isImage(mimetype)) {
               const existingSig = await getSignature(userId);
-              const fileData = await downloadSlackFile(file.url_private);
+              const fileData = await downloadSlackFile(file.url_private_download || file.url_private);
               const saved = await saveSignature(userId, fileData, mimetype);
               if (saved) {
                 const msg = existingSig
@@ -499,8 +511,8 @@ Deno.serve(async (req) => {
               }
 
               try {
-                const pdfData = await downloadSlackFile(file.url_private);
-                await cacheLastPdf(userId, file.url_private, file.name || "document.pdf", channel);
+                const pdfData = await downloadSlackFile(file.url_private_download || file.url_private);
+                await cacheLastPdf(userId, file.url_private_download || file.url_private, file.name || "document.pdf", channel);
 
                 const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
                 const signedFilename = `signed_${file.name || "document.pdf"}`;
