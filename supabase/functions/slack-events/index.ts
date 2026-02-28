@@ -415,7 +415,15 @@ Deno.serve(async (req) => {
       const payloadStr = params.get("payload");
       if (payloadStr) {
         const interactionPayload = JSON.parse(payloadStr);
-        await handleInteraction(interactionPayload);
+        // Respond to Slack immediately (<3s), process in background via waitUntil
+        const bgWork = handleInteraction(interactionPayload).catch(
+          (err) => console.error("Interaction handler error:", err)
+        );
+        // @ts-ignore - Deno Deploy / Supabase Edge Runtime global
+        if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+          // @ts-ignore
+          EdgeRuntime.waitUntil(bgWork);
+        }
         return new Response("", { headers: corsHeaders });
       }
     }
