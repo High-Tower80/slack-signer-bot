@@ -1,4 +1,4 @@
-import { FileText, Upload, PenTool, CheckCircle, MessageSquare, Zap, Shield, RefreshCw, HelpCircle, Settings } from "lucide-react";
+import { FileText, Upload, PenTool, CheckCircle, MessageSquare, Zap, Shield, RefreshCw, MousePointerClick, Move, Brain, ImageOff } from "lucide-react";
 
 const steps = [
   {
@@ -9,17 +9,17 @@ const steps = [
   {
     icon: <PenTool className="h-8 w-8" />,
     title: "2. Upload Your Signature",
-    description: "Send a PNG or JPG image of your signature. The bot securely stores it and confirms it's ready to use. You only need to do this once.",
+    description: "Send a PNG or JPG image of your signature. The bot automatically removes the background, making it transparent for clean overlays on any document.",
   },
   {
     icon: <Upload className="h-8 w-8" />,
     title: "3. Upload a PDF",
-    description: "Drag and drop any PDF document into the DM. The bot automatically detects signature fields or places your signature at the bottom of the first page.",
+    description: "Drag and drop any PDF document into the DM — or use the 3-dot menu shortcut on any message with a PDF attachment.",
   },
   {
     icon: <CheckCircle className="h-8 w-8" />,
     title: "4. Get Your Signed PDF",
-    description: "Within seconds, the bot replies with your signed PDF as a downloadable file — ready to share, send, or archive.",
+    description: "Within seconds, the bot replies with your signed PDF. Need it different? Just tell the bot — \"make it bigger\", \"page 2 bottom left\", \"try again smaller\".",
   },
 ];
 
@@ -40,9 +40,24 @@ const features = [
     description: "Changed your signature? Simply send a new image and the bot replaces the old one instantly.",
   },
   {
-    icon: <HelpCircle className="h-6 w-6" />,
-    title: "Smart Detection",
-    description: "The bot scans for signature fields in your PDF. If none are found, it places the signature in a clean spot on the first page.",
+    icon: <ImageOff className="h-6 w-6" />,
+    title: "Auto Background Removal",
+    description: "The bot automatically removes white/light backgrounds from your signature image, giving you a clean transparent overlay.",
+  },
+  {
+    icon: <MousePointerClick className="h-6 w-6" />,
+    title: "3-Dot Menu Shortcut",
+    description: "See a PDF in any channel? Click the ⋮ menu → \"Sign PDF\" and the bot signs it right there in the thread.",
+  },
+  {
+    icon: <Brain className="h-6 w-6" />,
+    title: "AI-Powered Adjustments",
+    description: "Tell the bot where to place your signature using plain English — \"bigger\", \"page 3 top center\", \"try again bottom left\".",
+  },
+  {
+    icon: <Move className="h-6 w-6" />,
+    title: "Flexible Placement",
+    description: "Choose from 7 positions (top/bottom × left/center/right + center) across any page, with 4 size options from small to extra large.",
   },
 ];
 
@@ -60,17 +75,22 @@ const gettingStartedSteps = [
   {
     step: "3",
     title: "Save Your Signature",
-    description: "Take a photo of your signature on white paper, or use any drawing tool to create a digital signature. Save it as a PNG or JPG file, then send it to the bot. You'll see a confirmation message: \"✅ Signature saved!\"",
+    description: "Take a photo of your signature on white paper, or use any drawing tool to create a digital signature. Save it as a PNG or JPG file, then send it to the bot. The background is removed automatically and you'll see: \"✅ Signature saved!\"",
   },
   {
     step: "4",
     title: "Sign Your First PDF",
-    description: "Upload any PDF document to the DM. The bot will process it, apply your signature, and send back the signed version as a downloadable file within seconds.",
+    description: "Upload any PDF document to the DM. The bot will process it, apply your signature, and send back the signed version within seconds.",
   },
   {
     step: "5",
-    title: "Share & Repeat",
-    description: "Download the signed PDF and share it however you need — email, Slack channels, cloud storage. Your signature stays saved, so next time just upload another PDF.",
+    title: "Adjust If Needed",
+    description: "Not happy with the placement? Just reply with natural language instructions like \"make it bigger\", \"move to top left\", or \"page 2 bottom center\". The bot re-signs instantly.",
+  },
+  {
+    step: "6",
+    title: "Use the Shortcut",
+    description: "See a PDF in any Slack channel? Click the ⋮ (three dots) on the message → More message shortcuts → \"Sign PDF\". The signed version appears as a threaded reply.",
   },
 ];
 
@@ -86,7 +106,7 @@ const Index = () => {
           Slack PDF Signature Bot
         </h1>
         <p className="max-w-2xl text-lg text-muted-foreground leading-relaxed">
-          Stop switching between apps to sign documents. The Slack PDF Signature Bot lets you save your personal signature once and apply it to any PDF — all without leaving Slack. Just open a DM, upload your document, and get your signed PDF back in seconds. It's the fastest, simplest way to handle document signing for individuals and teams.
+          Sign PDFs without leaving Slack. Save your signature once, upload a document, and get it signed in seconds — right in a DM or from any channel using the 3-dot menu shortcut. Need a different placement? Just tell the bot in plain English.
         </p>
       </header>
 
@@ -161,15 +181,23 @@ const Index = () => {
           <div className="space-y-6">
             <div>
               <h3 className="mb-1 font-semibold">What file formats are supported for signatures?</h3>
-              <p className="text-muted-foreground">PNG and JPG images. For best results, use a signature on a white background with clear contrast.</p>
+              <p className="text-muted-foreground">PNG and JPG images. The bot automatically removes white/light backgrounds for a clean transparent signature.</p>
             </div>
             <div>
               <h3 className="mb-1 font-semibold">Can I update my signature?</h3>
-              <p className="text-muted-foreground">Yes! Simply send a new signature image to the bot and it will automatically replace the previous one.</p>
+              <p className="text-muted-foreground">Yes! Simply send a new signature image to the bot and it will automatically replace the previous one. You can also use the "Update Signature" button in the bot's Home Tab.</p>
             </div>
             <div>
               <h3 className="mb-1 font-semibold">Where does the signature get placed on the PDF?</h3>
-              <p className="text-muted-foreground">The bot looks for signature fields or lines in the document first. If none are found, it places the signature at the bottom of the first page in available white space.</p>
+              <p className="text-muted-foreground">By default, the signature is placed at the bottom-right of the first page. You can adjust this by replying with instructions like "top left", "page 2 center", or "make it bigger".</p>
+            </div>
+            <div>
+              <h3 className="mb-1 font-semibold">Can I sign a PDF from any Slack channel?</h3>
+              <p className="text-muted-foreground">Yes! Click the ⋮ (three dots) on any message with a PDF attachment, select "More message shortcuts", then "Sign PDF". The signed version appears as a threaded reply.</p>
+            </div>
+            <div>
+              <h3 className="mb-1 font-semibold">What if I want the signature in a different spot or size?</h3>
+              <p className="text-muted-foreground">Just reply with natural language — "make it bigger", "page 3 bottom left", "try again smaller, top center". The bot uses AI to understand your intent and re-signs the document instantly.</p>
             </div>
             <div>
               <h3 className="mb-1 font-semibold">Is my data secure?</h3>
