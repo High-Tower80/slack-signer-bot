@@ -52,23 +52,55 @@ async function verifySlackSignature(
   return `v0=${hex}` === signature;
 }
 
-async function downloadSlackFile(url: string): Promise<Uint8Array> {
-  // Prefer url_private_download; if caller passed url_private, append ?t= won't help,
-  // but the Authorization header should still work for url_private on newer Slack APIs.
-  const res = await fetch(url, {
+// Fetch fresh file info from Slack API to get a valid download URL
+async function getSlackFileInfo(fileId: string): Promise<{ url_private_download: string; url_private: string; name: string; mimetype: string }> {
+  const res = await fetch(`https://slack.com/api/files.info?file=${fileId}`, {
     headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
   });
-  if (!res.ok) {
-    throw new Error(`Slack file download failed: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  if (!data.ok) {
+    console.error("files.info failed:", data);
+    throw new Error(`files.info failed: ${data.error}`);
   }
-  const contentType = res.headers.get("content-type") || "";
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  // Detect if Slack returned an HTML page instead of the actual file
-  if (contentType.includes("text/html") || (bytes.length > 4 && bytes[0] === 0x3C)) {
-    console.error("Slack returned HTML instead of file. Content-Type:", contentType, "URL:", url);
-    throw new Error("Slack returned HTML instead of file data. The file URL may have expired or the bot lacks files:read scope.");
+  return data.file;
+}
+
+async function downloadSlackFile(url: string): Promise<Uint8Array> {
+  // Follow redirects manually to preserve auth header
+  let currentUrl = url;
+  for (let i = 0; i < 5; i++) {
+    const res = await fetch(currentUrl, {
+      headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
+      redirect: "manual",
+    });
+
+    // Handle redirects — re-attach auth header
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (location) {
+        // Consume body to avoid resource leak
+        await res.text();
+        currentUrl = location;
+        continue;
+      }
+    }
+
+    if (!res.ok) {
+      await res.text();
+      throw new Error(`Slack file download failed: ${res.status} ${res.statusText}`);
+    }
+
+    const contentType = res.headers.get("content-type") || "";
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    // Detect if Slack returned an HTML page instead of the actual file
+    if (contentType.includes("text/html") || (bytes.length > 4 && bytes[0] === 0x3C)) {
+      console.error("Slack returned HTML instead of file. Content-Type:", contentType, "URL:", currentUrl);
+      throw new Error("Slack returned HTML instead of file data. The file URL may have expired or the bot lacks files:read scope.");
+    }
+    return bytes;
   }
-  return bytes;
+  throw new Error("Too many redirects downloading Slack file");
 }
 
 async function sendSlackMessage(channel: string, text: string, threadTs?: string) {
@@ -367,15 +399,29 @@ async function handleMessageShortcut(payload: any) {
 
   for (const file of pdfFiles) {
     try {
-      const pdfData = await downloadSlackFile(file.url_private_download || file.url_private);
+      // Use files.info API to get fresh download URL (shortcut URLs from channels may be stale)
+      let downloadUrl = file.url_private_download || file.url_private;
+      let fileName = file.name || "document.pdf";
+      if (file.id) {
+        try {
+          const freshFile = await getSlackFileInfo(file.id);
+          downloadUrl = freshFile.url_private_download || freshFile.url_private || downloadUrl;
+          fileName = freshFile.name || fileName;
+          console.log("Got fresh download URL via files.info for file:", file.id);
+        } catch (e) {
+          console.warn("files.info failed, falling back to payload URL:", e);
+        }
+      }
+
+      const pdfData = await downloadSlackFile(downloadUrl);
 
       // Cache original PDF URL for follow-up adjustments
-      await cacheLastPdf(userId, file.url_private_download || file.url_private, file.name || "document.pdf", channel, threadTs);
+      await cacheLastPdf(userId, downloadUrl, fileName, channel, threadTs);
 
       const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
-      const signedFilename = `signed_${file.name || "document.pdf"}`;
+      const signedFilename = `signed_${fileName}`;
 
-      await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${file.title || file.name || "document.pdf"}`, threadTs);
+      await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${file.title || fileName}`, threadTs);
       await sendSlackMessage(channel, `✅ Signed! Reply here to adjust — e.g. "make it bigger", "page 2 bottom left", "try again smaller, top center"`, threadTs);
     } catch (err) {
       console.error("Shortcut PDF signing error:", err);
