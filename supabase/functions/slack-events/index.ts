@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
-import { Image } from "https://esm.sh/imagescript@1.3.0";
+import UPNG from "https://esm.sh/upng-js@2.1.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -110,24 +110,20 @@ async function uploadSlackFile(
 }
 
 // Remove white/light background from signature image, return transparent PNG bytes
-async function removeBackground(imageData: Uint8Array): Promise<Uint8Array> {
-  const img = await Image.decode(imageData);
-  const threshold = 230; // pixels with R,G,B all above this are considered "white"
+function removeBackground(imageData: Uint8Array): Uint8Array {
+  const img = UPNG.decode(imageData);
+  const rgba = new Uint8Array(UPNG.toRGBA8(img)[0]);
+  const threshold = 230;
 
-  for (let x = 1; x <= img.width; x++) {
-    for (let y = 1; y <= img.height; y++) {
-      const color = img.getPixelAt(x, y);
-      const r = (color >> 24) & 0xff;
-      const g = (color >> 16) & 0xff;
-      const b = (color >> 8) & 0xff;
-      if (r >= threshold && g >= threshold && b >= threshold) {
-        // Set alpha to 0 (transparent)
-        img.setPixelAt(x, y, (r << 24) | (g << 16) | (b << 8) | 0);
-      }
+  for (let i = 0; i < rgba.length; i += 4) {
+    const r = rgba[i], g = rgba[i + 1], b = rgba[i + 2];
+    if (r >= threshold && g >= threshold && b >= threshold) {
+      rgba[i + 3] = 0; // Set alpha to 0 (transparent)
     }
   }
 
-  return await img.encode();
+  const encoded = UPNG.encode([rgba.buffer], img.width, img.height, 0);
+  return new Uint8Array(encoded);
 }
 
 // Get user's saved signature
@@ -159,7 +155,7 @@ async function saveSignature(
   // Remove background and always save as PNG for transparency
   let processedData: Uint8Array;
   try {
-    processedData = await removeBackground(imageData);
+    processedData = removeBackground(imageData);
   } catch (err) {
     console.error("Background removal failed, saving original:", err);
     processedData = imageData;
