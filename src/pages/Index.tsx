@@ -109,6 +109,9 @@ const Index = () => {
         <p className="max-w-2xl text-lg text-muted-foreground leading-relaxed">
           Signing PDFs shouldn't mean leaving Slack, downloading files, opening another app, and re-uploading. For teams that live in Slack — sales, legal, HR, ops — this bot eliminates the friction. Save your signature once, drop in a PDF, and get it back signed in seconds. All without switching a single tab.
         </p>
+        <a href="https://github.com/High-Tower80/slack-signer-bot" target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-1.5 text-primary hover:underline font-medium">
+          View source on GitHub →
+        </a>
       </header>
 
       {/* How it works */}
