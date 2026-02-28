@@ -340,14 +340,101 @@ function isPdf(mimetype: string): boolean {
   return mimetype === "application/pdf";
 }
 
-// Handle interactive payloads (button clicks etc.)
+// Handle message shortcut (3-dot menu → "Sign PDF")
+async function handleMessageShortcut(payload: any) {
+  const userId = payload.user?.id;
+  const message = payload.message;
+  const channel = payload.channel?.id;
+
+  if (!message || !channel || !userId) {
+    console.error("Missing data in message shortcut payload");
+    return;
+  }
+
+  const files = message.files || [];
+  const pdfFiles = files.filter((f: any) => isPdf(f.mimetype || ""));
+
+  if (pdfFiles.length === 0) {
+    await sendSlackMessage(channel, "⚠️ That message doesn't contain any PDF files to sign.");
+    return;
+  }
+
+  const signatureData = await getSignature(userId);
+  if (!signatureData) {
+    await sendSlackMessage(
+      channel,
+      `<@${userId}> ⚠️ You haven't saved a signature yet. DM me a PNG/JPG of your signature first!`
+    );
+    return;
+  }
+
+  const threadTs = message.ts; // reply in thread on the original message
+
+  for (const file of pdfFiles) {
+    try {
+      const pdfData = await downloadSlackFile(file.url_private);
+      const signedPdf = await signPdf(pdfData, signatureData, "image/png");
+      const signedFilename = `signed_${file.name || "document.pdf"}`;
+
+      // Upload to the same channel, threaded on the original message
+      const uploadRes = await fetch("https://slack.com/api/files.getUploadURLExternal", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          filename: signedFilename,
+          length: signedPdf.length.toString(),
+        }),
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadData.ok) {
+        console.error("Failed to get upload URL:", uploadData);
+        throw new Error("Upload URL failed");
+      }
+
+      await fetch(uploadData.upload_url, { method: "POST", body: signedPdf });
+
+      const completeRes = await fetch("https://slack.com/api/files.completeUploadExternal", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          files: [{ id: uploadData.file_id, title: `Signed: ${file.title || file.name || "document.pdf"}` }],
+          channel_id: channel,
+          thread_ts: threadTs,
+        }),
+      });
+      const completeData = await completeRes.json();
+      if (!completeData.ok) {
+        console.error("Failed to complete upload:", completeData);
+      }
+    } catch (err) {
+      console.error("Shortcut PDF signing error:", err);
+      await sendSlackMessage(channel, `❌ Failed to sign "${file.name || "PDF"}". Make sure it's a valid PDF.`);
+    }
+  }
+}
+
+// Handle interactive payloads (button clicks, shortcuts, etc.)
 async function handleInteraction(payload: any) {
+  console.log("Interaction type:", payload.type, "callback_id:", payload.callback_id);
+
+  // Message shortcut
+  if (payload.type === "message_action" && payload.callback_id === "sign_pdf") {
+    await handleMessageShortcut(payload);
+    return;
+  }
+
+  // Button clicks (block_actions)
   const userId = payload.user?.id;
   const actions = payload.actions || [];
 
   for (const action of actions) {
     if (action.action_id === "upload_signature_prompt") {
-      // Open a DM with the user and send instructions
       const convRes = await fetch("https://slack.com/api/conversations.open", {
         method: "POST",
         headers: {
