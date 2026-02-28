@@ -262,14 +262,15 @@ Deno.serve(async (req) => {
           const mimetype = file.mimetype || "";
 
           if (isImage(mimetype)) {
-            // Save as signature
+            // Check if user already has a signature
+            const existingSig = await getSignature(userId);
             const fileData = await downloadSlackFile(file.url_private);
             const saved = await saveSignature(userId, fileData, mimetype);
             if (saved) {
-              await sendSlackMessage(
-                channel,
-                "✅ Signature saved! Upload a PDF anytime to sign it."
-              );
+              const msg = existingSig
+                ? "✅ Signature updated! Your new signature will be used for future PDFs."
+                : "✅ Signature saved! Upload a PDF anytime to sign it.";
+              await sendSlackMessage(channel, msg);
             } else {
               await sendSlackMessage(
                 channel,
