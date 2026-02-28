@@ -31,8 +31,13 @@ Sign PDFs without leaving Slack. Save your signature once, drop in a PDF, get it
 
 No secrets or API keys are stored in the codebase. To run your own instance:
 
-1. Remix this project on [Lovable](https://lovable.dev)
+**Option A — Remix on Lovable**
+1. Open the project on [Lovable](https://lovable.dev) and click **Remix**
 2. Follow the [Setup Guide](https://slack-signer-bot.lovable.app/setup)
+
+**Option B — Fork / Clone from GitHub**
+1. Fork or clone this repo
+2. Follow the [Setup Guide](https://slack-signer-bot.lovable.app/setup) to configure your Slack app, database, and secrets
 
 Or see `supabase/functions/slack-events/index.ts` for the full edge function source.
 
