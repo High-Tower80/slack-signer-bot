@@ -720,10 +720,14 @@ Deno.serve(async (req) => {
           else if (event.text && !event.files) {
             const text = event.text.trim();
 
-            // Check if user has a cached PDF to re-sign
-            const cached = await getLastPdf(userId);
+            // Check if user has a cached PDF to re-sign.
+            // In channel threads, look up by thread so anyone (e.g. the accountant) can adjust;
+            // the signature always comes from the cached row's owner (the signer).
+            const cached = (!isDm && event.thread_ts)
+              ? await getLastPdfByThread(event.thread_ts)
+              : await getLastPdf(userId);
             if (cached && looksLikeAdjustment(text)) {
-              const signatureData = await getSignature(userId);
+              const signatureData = await getSignature(cached.slack_user_id);
               if (!signatureData) {
                 await sendSlackMessage(channel, "⚠️ No signature found. Please upload one first.");
                 return;
