@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 import UPNG from "https://esm.sh/upng-js@2.1.0";
+import { getDocumentProxy } from "npm:unpdf@0.12.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,19 +21,19 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 const processedEventIds = new Set<string>();
 const MAX_EVENT_CACHE = 1000;
 
-const VALID_POSITIONS = new Set(["bottom-right", "bottom-left", "bottom-center", "top-right", "top-left", "top-center", "center"]);
+const VALID_POSITIONS = new Set(["near-total", "bottom-right", "bottom-left", "bottom-center", "top-right", "top-left", "top-center", "center"]);
 const VALID_SCALES = new Set(["small", "medium", "large", "xlarge"]);
 
 // ─── Placement types ───────────────────────────────────────────────
 interface SigningOptions {
   page: number; // 0-indexed, -1 = last page
-  position: "bottom-right" | "bottom-left" | "bottom-center" | "top-right" | "top-left" | "top-center" | "center";
+  position: "near-total" | "bottom-right" | "bottom-left" | "bottom-center" | "top-right" | "top-left" | "top-center" | "center";
   scale: "small" | "medium" | "large" | "xlarge";
 }
 
 const DEFAULT_OPTIONS: SigningOptions = {
   page: 0,
-  position: "bottom-right",
+  position: "near-total",
   scale: "xlarge",
 };
 
@@ -243,11 +244,12 @@ async function parseSigningInstruction(userText: string, totalPages: number): Pr
             content: `You parse signature placement instructions for a PDF signing bot. The PDF has ${totalPages} page(s).
 Return ONLY a JSON object with these fields:
 - "page": 1-indexed page number, or "last" for last page. Default 1.
-- "position": one of "bottom-right", "bottom-left", "bottom-center", "top-right", "top-left", "top-center", "center". Default "bottom-right".
+- "position": one of "near-total" (next to/under the document's Total amount), "bottom-right", "bottom-left", "bottom-center", "top-right", "top-left", "top-center", "center". Default "near-total" unless the user names a specific spot.
 - "scale": one of "small", "medium", "large", "xlarge". Default "large".
 
 Examples:
-"make it bigger" → {"page":1,"position":"bottom-right","scale":"xlarge"}
+"make it bigger" → {"page":1,"position":"near-total","scale":"xlarge"}
+"put it by the total" → {"page":1,"position":"near-total","scale":"large"}
 "page 2 bottom left" → {"page":2,"position":"bottom-left","scale":"large"}
 "smaller, top right, last page" → {"page":"last","position":"top-right","scale":"small"}
 "center of page 3" → {"page":3,"position":"center","scale":"large"}
@@ -269,7 +271,7 @@ Return ONLY the JSON, no markdown, no explanation.`,
     const pageNum = parsed.page === "last" ? -1 : (parseInt(parsed.page) || 1) - 1;
     const clampedPage = pageNum === -1 ? totalPages - 1 : Math.max(0, Math.min(pageNum, totalPages - 1));
 
-    const position = VALID_POSITIONS.has(parsed.position) ? parsed.position : "bottom-right";
+    const position = VALID_POSITIONS.has(parsed.position) ? parsed.position : "near-total";
     const scale = VALID_SCALES.has(parsed.scale) ? parsed.scale : "large";
 
     return {
@@ -288,6 +290,27 @@ async function signPdf(
   pdfBytes: Uint8Array, signatureBytes: Uint8Array, options: SigningOptions = DEFAULT_OPTIONS
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.load(pdfBytes);
+  const pagesAll = pdfDoc.getPages();
+  if (options.position === "near-total") {
+    const hit = await findTotal(pdfBytes);
+    if (hit) {
+      const sigImage = await pdfDoc.embedPng(signatureBytes);
+      const page = pagesAll[hit.page];
+      const { width: pw } = page.getSize();
+      const dims = SCALE_MAP[options.scale] || SCALE_MAP.large;
+      // keep it proportionate to the line; cap so it fits on the page
+      const maxW = Math.min(dims.maxWidth * 0.6, pw - hit.x - 20);
+      const maxH = dims.maxHeight * 0.6;
+      const sc = Math.min(maxW / sigImage.width, maxH / sigImage.height);
+      const w = sigImage.width * sc, h = sigImage.height * sc;
+      let x = hit.x, y = hit.y - h - 4; // directly under the Total line
+      if (y < 20) { x = Math.min(hit.x + hit.w + 12, pw - w - 20); y = hit.y - h / 3; } // no room below → beside it
+      page.drawImage(sigImage, { x, y, width: w, height: h });
+      return await pdfDoc.save();
+    }
+    console.log("No 'Total' found, falling back to bottom-right");
+    options = { ...options, position: "bottom-right" };
+  }
   const sigImage = await pdfDoc.embedPng(signatureBytes);
 
   const pages = pdfDoc.getPages();
@@ -323,6 +346,41 @@ async function signPdf(
 
   targetPage.drawImage(sigImage, { x, y, width: sigWidth, height: sigHeight });
   return await pdfDoc.save();
+}
+
+// Find the "Total" line (prefers Grand Total / Total Due; ignores Subtotal). Returns PDF coords.
+async function findTotal(pdfBytes: Uint8Array): Promise<{ page: number; x: number; y: number; w: number } | null> {
+  try {
+    const doc = await getDocumentProxy(new Uint8Array(pdfBytes));
+    let best: { page: number; x: number; y: number; w: number; score: number } | null = null;
+    for (let p = 1; p <= doc.numPages; p++) {
+      const pg = await doc.getPage(p);
+      const tc = await pg.getTextContent();
+      for (const it of tc.items as any[]) {
+        const t = (it.str || "").trim();
+        if (!/\btotal\b/i.test(t) || /sub\s*-?\s*total/i.test(t)) continue;
+        let score = 1;
+        if (/grand\s+total|total\s+(due|amount|payable)|amount\s+due/i.test(t)) score = 3;
+        else if (/^total\b/i.test(t)) score = 2;
+        const x = it.transform[4], y = it.transform[5];
+        // later pages and lower positions win ties (final total is usually last)
+        const cand = { page: p - 1, x, y, w: it.width || 60, score };
+        if (!best || score > best.score || (score === best.score && (p - 1 > best.page || (p - 1 === best.page && y < best.y)))) best = cand;
+      }
+    }
+    return best;
+  } catch (e) {
+    console.error("findTotal error:", e);
+    return null;
+  }
+}
+
+// Owner whose signature is applied to PDFs dropped in channels.
+async function getChannelSignerId(): Promise<string | null> {
+  const envId = Deno.env.get("SIGNER_SLACK_USER_ID");
+  if (envId) return envId;
+  const { data } = await supabase.from("signatures").select("slack_user_id").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+  return data?.slack_user_id ?? null;
 }
 
 function isImage(mimetype: string): boolean { return mimetype.startsWith("image/"); }
@@ -574,6 +632,39 @@ Deno.serve(async (req) => {
         const bgWork = (async () => {
           const channel = event.channel;
           const userId = event.user;
+          const isDm = event.channel_type === "im";
+
+          // Channel workflow: any PDF dropped in a channel the bot is in gets signed with the owner's signature
+          if (!isDm && event.files && event.files.length > 0) {
+            const pdfs = event.files.filter((f: any) => isPdf(f.mimetype || ""));
+            if (pdfs.length === 0) return;
+            const signerId = await getChannelSignerId();
+            const signatureData = signerId ? await getSignature(signerId) : null;
+            if (!signerId || !signatureData) {
+              await sendSlackMessage(channel, "⚠️ No saved signature found. DM me a signature image first.", event.ts);
+              return;
+            }
+            for (const file of pdfs) {
+              try {
+                let url = file.url_private_download || file.url_private;
+                try { const fi = await getSlackFileInfo(file.id); url = fi.url_private_download || fi.url_private || url; } catch (_) { /* fallback */ }
+                const pdfData = await downloadSlackFile(url);
+                await cacheLastPdf(signerId, url, file.name || "document.pdf", channel, event.ts);
+                const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
+                await uploadSlackFile(channel, signedPdf, `signed_${file.name || "document.pdf"}`, `Signed: ${file.title || file.name || "document.pdf"}`, event.ts);
+                await sendSlackMessage(channel, `✅ Signed for <@${signerId}> to review. <@${signerId}>, reply in this thread to adjust — e.g. "make it bigger" or "page 2 bottom left".`, event.ts);
+              } catch (err) {
+                console.error("Channel PDF signing error:", err);
+                await sendSlackMessage(channel, `❌ Failed to sign "${file.name || "PDF"}".`, event.ts);
+              }
+            }
+            return;
+          }
+          // In channels, only the signer's thread replies are treated as adjustments
+          if (!isDm && !event.files) {
+            const signerId = await getChannelSignerId();
+            if (userId !== signerId || !event.thread_ts) return;
+          }
 
           // Handle file uploads
           if (event.files && event.files.length > 0) {
