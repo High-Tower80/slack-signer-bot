@@ -126,7 +126,7 @@ async function downloadSlackFile(url: string): Promise<Uint8Array> {
 async function sendSlackMessage(channel: string, text: string, threadTs?: string) {
   const body: Record<string, string> = { channel, text };
   if (threadTs) body.thread_ts = threadTs;
-  await fetch("https://slack.com/api/chat.postMessage", {
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
@@ -134,6 +134,45 @@ async function sendSlackMessage(channel: string, text: string, threadTs?: string
     },
     body: JSON.stringify(body),
   });
+  try { const j = await res.json(); return j.ts as string | undefined; } catch { return undefined; }
+}
+
+const APPROVE_REACTIONS = new Set(["white_check_mark", "heavy_check_mark", "ballot_box_with_check"]);
+
+async function handleApprovalReaction(event: any) {
+  if (!APPROVE_REACTIONS.has(event.reaction) || event.item?.type !== "message") return;
+  const signerId = await getChannelSignerId();
+  if (!signerId || event.user !== signerId) return;
+  const { channel, ts } = event.item;
+  const { data: rows } = await supabase.from("pending_approvals").select("id, thread_ts")
+    .eq("channel", channel).is("approved_at", null)
+    .or(`thread_ts.eq.${ts},bot_msg_ts.eq.${ts}`);
+  if (!rows || rows.length === 0) return;
+  for (const r of rows) {
+    await supabase.from("pending_approvals").update({ approved_at: new Date().toISOString() }).eq("id", r.id);
+    await sendSlackMessage(channel, `✅ Approved by <@${signerId}>.`, r.thread_ts);
+  }
+}
+
+async function sendReminders() {
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const nearlyHourAgo = new Date(Date.now() - 55 * 60 * 1000).toISOString();
+  const { data: rows } = await supabase.from("pending_approvals").select("*")
+    .is("approved_at", null).lt("created_at", hourAgo)
+    .or(`last_reminded_at.is.null,last_reminded_at.lt.${nearlyHourAgo}`).limit(50);
+  for (const r of rows || []) {
+    const hrs = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 3600000);
+    await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        channel: r.channel, thread_ts: r.thread_ts, reply_broadcast: true,
+        text: `⏰ <@${r.signer_id}> reminder: "${r.file_names}" has been waiting ${hrs}h for your approval. React ✅ on the signed message to approve.`,
+      }),
+    });
+    await supabase.from("pending_approvals").update({ last_reminded_at: new Date().toISOString() }).eq("id", r.id);
+  }
+  return (rows || []).length;
 }
 
 async function uploadSlackFile(
@@ -594,6 +633,12 @@ Deno.serve(async (req) => {
     const payload = JSON.parse(bodyText);
     console.log("Parsed payload type:", payload.type, "event type:", payload.event?.type);
 
+    // Hourly reminder trigger (idempotent: each item is reminded at most once per hour)
+    if (payload.action === "remind") {
+      const n = await sendReminders();
+      return new Response(JSON.stringify({ reminded: n }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // URL verification
     if (payload.type === "url_verification") {
       return new Response(JSON.stringify({ challenge: payload.challenge }), {
@@ -632,6 +677,11 @@ Deno.serve(async (req) => {
         return new Response("ok", { headers: corsHeaders });
       }
 
+      if (event.type === "reaction_added") {
+        await handleApprovalReaction(event).catch((e) => console.error("Reaction error:", e));
+        return new Response("ok", { headers: corsHeaders });
+      }
+
       if (event.bot_id || event.subtype === "bot_message") {
         return new Response("ok", { headers: corsHeaders });
       }
@@ -653,6 +703,8 @@ Deno.serve(async (req) => {
               await sendSlackMessage(channel, "⚠️ No saved signature found. DM me a signature image first.", event.ts);
               return;
             }
+            const signedNames: string[] = [];
+            let botMsgTs: string | undefined;
             for (const file of pdfs) {
               try {
                 let url = file.url_private_download || file.url_private;
@@ -661,11 +713,18 @@ Deno.serve(async (req) => {
                 await cacheLastPdf(signerId, url, file.name || "document.pdf", channel, event.ts);
                 const signedPdf = await signPdf(pdfData, signatureData, DEFAULT_OPTIONS);
                 await uploadSlackFile(channel, signedPdf, `signed_${file.name || "document.pdf"}`, `Signed: ${file.title || file.name || "document.pdf"}`, event.ts);
-                await sendSlackMessage(channel, `✅ Signed for <@${signerId}> to review. <@${signerId}>, reply in this thread to adjust — e.g. "make it bigger" or "page 2 bottom left".`, event.ts);
+                botMsgTs = await sendSlackMessage(channel, `🖊️ Signed for <@${signerId}> to review. Reply in this thread to adjust (e.g. "make it bigger"). <@${signerId}>, react ✅ on this message to approve.`, event.ts);
+                signedNames.push(file.name || "document.pdf");
               } catch (err) {
                 console.error("Channel PDF signing error:", err);
                 await sendSlackMessage(channel, `❌ Failed to sign "${file.name || "PDF"}".`, event.ts);
               }
+            }
+            if (signedNames.length > 0) {
+              await supabase.from("pending_approvals").upsert({
+                channel, thread_ts: event.ts, bot_msg_ts: botMsgTs ?? null, signer_id: signerId,
+                file_names: signedNames.join(", "), approved_at: null, last_reminded_at: null,
+              }, { onConflict: "channel,thread_ts" });
             }
             return;
           }

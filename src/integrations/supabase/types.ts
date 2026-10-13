@@ -47,6 +47,42 @@ export type Database = {
         }
         Relationships: []
       }
+      pending_approvals: {
+        Row: {
+          approved_at: string | null
+          bot_msg_ts: string | null
+          channel: string
+          created_at: string
+          file_names: string
+          id: string
+          last_reminded_at: string | null
+          signer_id: string
+          thread_ts: string
+        }
+        Insert: {
+          approved_at?: string | null
+          bot_msg_ts?: string | null
+          channel: string
+          created_at?: string
+          file_names?: string
+          id?: string
+          last_reminded_at?: string | null
+          signer_id: string
+          thread_ts: string
+        }
+        Update: {
+          approved_at?: string | null
+          bot_msg_ts?: string | null
+          channel?: string
+          created_at?: string
+          file_names?: string
+          id?: string
+          last_reminded_at?: string | null
+          signer_id?: string
+          thread_ts?: string
+        }
+        Relationships: []
+      }
       signatures: {
         Row: {
           created_at: string
