@@ -401,6 +401,15 @@ async function getLastPdf(userId: string) {
   return data;
 }
 
+// Channel threads: find the cached PDF by the thread it was signed in,
+// so anyone in the thread (not just the signer) can request adjustments.
+async function getLastPdfByThread(threadTs: string) {
+  const { data } = await supabase
+    .from("last_signed_pdfs").select("*")
+    .eq("thread_ts", threadTs).maybeSingle();
+  return data;
+}
+
 // ─── Home Tab ──────────────────────────────────────────────────────
 async function publishHomeTab(userId: string) {
   const { data: sigRecord } = await supabase
