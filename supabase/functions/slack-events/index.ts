@@ -660,10 +660,9 @@ Deno.serve(async (req) => {
             }
             return;
           }
-          // In channels, only the signer's thread replies are treated as adjustments
+          // In channels, any thread reply (e.g. the accountant) can request adjustments
           if (!isDm && !event.files) {
-            const signerId = await getChannelSignerId();
-            if (userId !== signerId || !event.thread_ts) return;
+            if (!event.thread_ts) return;
           }
 
           // Handle file uploads
