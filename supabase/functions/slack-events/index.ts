@@ -401,6 +401,15 @@ async function getLastPdf(userId: string) {
   return data;
 }
 
+// Channel threads: find the cached PDF by the thread it was signed in,
+// so anyone in the thread (not just the signer) can request adjustments.
+async function getLastPdfByThread(threadTs: string) {
+  const { data } = await supabase
+    .from("last_signed_pdfs").select("*")
+    .eq("thread_ts", threadTs).maybeSingle();
+  return data;
+}
+
 // ─── Home Tab ──────────────────────────────────────────────────────
 async function publishHomeTab(userId: string) {
   const { data: sigRecord } = await supabase
@@ -660,10 +669,9 @@ Deno.serve(async (req) => {
             }
             return;
           }
-          // In channels, only the signer's thread replies are treated as adjustments
+          // In channels, any thread reply (e.g. the accountant) can request adjustments
           if (!isDm && !event.files) {
-            const signerId = await getChannelSignerId();
-            if (userId !== signerId || !event.thread_ts) return;
+            if (!event.thread_ts) return;
           }
 
           // Handle file uploads
@@ -712,10 +720,14 @@ Deno.serve(async (req) => {
           else if (event.text && !event.files) {
             const text = event.text.trim();
 
-            // Check if user has a cached PDF to re-sign
-            const cached = await getLastPdf(userId);
+            // Check if user has a cached PDF to re-sign.
+            // In channel threads, look up by thread so anyone (e.g. the accountant) can adjust;
+            // the signature always comes from the cached row's owner (the signer).
+            const cached = (!isDm && event.thread_ts)
+              ? await getLastPdfByThread(event.thread_ts)
+              : await getLastPdf(userId);
             if (cached && looksLikeAdjustment(text)) {
-              const signatureData = await getSignature(userId);
+              const signatureData = await getSignature(cached.slack_user_id);
               if (!signatureData) {
                 await sendSlackMessage(channel, "⚠️ No signature found. Please upload one first.");
                 return;
