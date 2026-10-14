@@ -167,7 +167,7 @@ async function sendReminders() {
       method: "POST",
       headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        channel: r.channel, thread_ts: r.thread_ts, reply_broadcast: true,
+        channel: r.channel, thread_ts: r.thread_ts, reply_broadcast: false,
         text: `⏰ <@${r.signer_id}> reminder: "${r.file_names}" has been waiting ${hrs}h for your approval. React ✅ on the signed message to approve.`,
       }),
     });
