@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
+import { PDFDocument, degrees } from "https://esm.sh/pdf-lib@1.17.1";
 import UPNG from "https://esm.sh/upng-js@2.1.0";
 import { getDocumentProxy } from "npm:unpdf@0.12.1";
 
@@ -29,6 +29,7 @@ interface SigningOptions {
   page: number; // 0-indexed, -1 = last page
   position: "near-total" | "bottom-right" | "bottom-left" | "bottom-center" | "top-right" | "top-left" | "top-center" | "center";
   scale: "small" | "medium" | "large" | "xlarge";
+  rotation?: number; // 0, 90, 180, 270 clockwise
 }
 
 const DEFAULT_OPTIONS: SigningOptions = {
@@ -284,10 +285,14 @@ async function parseSigningInstruction(userText: string, totalPages: number): Pr
 Return ONLY a JSON object with these fields:
 - "page": 1-indexed page number, or "last" for last page. Default 1.
 - "position": one of "near-total" (next to/under the document's Total amount), "bottom-right", "bottom-left", "bottom-center", "top-right", "top-left", "top-center", "center". Default "near-total" unless the user names a specific spot.
-- "scale": one of "small", "medium", "large", "xlarge". Default "large".
+- "scale": one of "small", "medium", "large", "xlarge". Default "xlarge".
+- "rotate": clockwise degrees to rotate the document pages: 0, 90, 180, or 270. "counterclockwise 90"/"left" = 270, "upside down" = 180. Use null if the user doesn't mention rotating.
+Ignore @mentions and filler words.
 
 Examples:
-"make it bigger" → {"page":1,"position":"near-total","scale":"xlarge"}
+"make it bigger" → {"page":1,"position":"near-total","scale":"xlarge","rotate":null}
+"rotate 90 degrees clockwise and redo" → {"page":1,"position":"near-total","scale":"xlarge","rotate":90}
+"it's sideways, rotate it left" → {"page":1,"position":"near-total","scale":"xlarge","rotate":270}
 "put it by the total" → {"page":1,"position":"near-total","scale":"large"}
 "page 2 bottom left" → {"page":2,"position":"bottom-left","scale":"large"}
 "smaller, top right, last page" → {"page":"last","position":"top-right","scale":"small"}
@@ -311,17 +316,35 @@ Return ONLY the JSON, no markdown, no explanation.`,
     const clampedPage = pageNum === -1 ? totalPages - 1 : Math.max(0, Math.min(pageNum, totalPages - 1));
 
     const position = VALID_POSITIONS.has(parsed.position) ? parsed.position : "near-total";
-    const scale = VALID_SCALES.has(parsed.scale) ? parsed.scale : "large";
+    const scale = VALID_SCALES.has(parsed.scale) ? parsed.scale : "xlarge";
+    const rotRaw = parseInt(parsed.rotate);
+    const rotation = [0, 90, 180, 270].includes(rotRaw) ? rotRaw : undefined;
 
     return {
       page: clampedPage,
       position,
       scale,
+      rotation,
     };
   } catch (err) {
     console.error("AI parsing error:", err);
     return null;
   }
+}
+
+// ─── PDF rotation (flattens each page rotated clockwise) ───────────
+async function rotatePdf(bytes: Uint8Array, deg: number): Promise<Uint8Array> {
+  if (!deg) return bytes;
+  const src = await PDFDocument.load(bytes);
+  const out = await PDFDocument.create();
+  for (const sp of src.getPages()) {
+    const emb = await out.embedPage(sp);
+    const { width: w, height: h } = sp.getSize();
+    if (deg === 90) out.addPage([h, w]).drawPage(emb, { x: 0, y: w, rotate: degrees(-90) });
+    else if (deg === 180) out.addPage([w, h]).drawPage(emb, { x: w, y: h, rotate: degrees(180) });
+    else out.addPage([h, w]).drawPage(emb, { x: h, y: 0, rotate: degrees(90) });
+  }
+  return await out.save();
 }
 
 // ─── PDF signing ───────────────────────────────────────────────────
@@ -428,7 +451,7 @@ function isPdf(mimetype: string): boolean { return mimetype === "application/pdf
 // ─── Last-signed PDF persistence (DB-backed) ──────────────────────
 async function cacheLastPdf(userId: string, pdfUrl: string, fileName: string, channel: string, threadTs?: string) {
   await supabase.from("last_signed_pdfs").upsert(
-    { slack_user_id: userId, pdf_url: pdfUrl, file_name: fileName, channel, thread_ts: threadTs || null },
+    { slack_user_id: userId, pdf_url: pdfUrl, file_name: fileName, channel, thread_ts: threadTs || null, rotation: 0 },
     { onConflict: "slack_user_id" }
   );
 }
@@ -587,7 +610,7 @@ async function handleInteraction(payload: any) {
 
 // ─── Check if text is a signing adjustment command ─────────────────
 function looksLikeAdjustment(text: string): boolean {
-  const keywords = ["bigger", "smaller", "larger", "tiny", "huge", "page", "bottom", "top", "left", "right", "center", "middle", "try again", "move", "resize", "xlarge", "small", "medium", "large"];
+  const keywords = ["rotate", "rotation", "sideways", "upside", "clockwise", "redo", "again", "total", "bigger", "smaller", "larger", "tiny", "huge", "page", "bottom", "top", "left", "right", "center", "middle", "try again", "move", "resize", "xlarge", "small", "medium", "large"];
   const lower = text.toLowerCase();
   return keywords.some((k) => lower.includes(k));
 }
@@ -786,9 +809,10 @@ Deno.serve(async (req) => {
               ? await getLastPdfByThread(event.thread_ts)
               : await getLastPdf(userId);
             if (cached && looksLikeAdjustment(text)) {
+              const rt = event.thread_ts || cached.thread_ts || undefined;
               const signatureData = await getSignature(cached.slack_user_id);
               if (!signatureData) {
-                await sendSlackMessage(channel, "⚠️ No signature found. Please upload one first.");
+                await sendSlackMessage(channel, "⚠️ No signature found. Please upload one first.", rt);
                 return;
               }
 
@@ -797,18 +821,20 @@ Deno.serve(async (req) => {
               try {
                 pdfBytes = await downloadSlackFile(cached.pdf_url);
               } catch {
-                await sendSlackMessage(channel, "⚠️ Could not retrieve the original PDF. Please upload it again.");
+                await sendSlackMessage(channel, "⚠️ Could not retrieve the original PDF. Please upload it again.", rt);
                 return;
               }
 
+              const options = await parseSigningInstruction(text.replace(/<@[A-Z0-9]+>/g, "").trim(), (await PDFDocument.load(pdfBytes)).getPageCount());
+              const rotation = options?.rotation ?? (cached.rotation || 0);
+              pdfBytes = await rotatePdf(pdfBytes, rotation);
               const tempDoc = await PDFDocument.load(pdfBytes);
               const totalPages = tempDoc.getPageCount();
 
-              await sendSlackMessage(channel, "🔄 Adjusting placement...");
+              await sendSlackMessage(channel, "🔄 Adjusting placement...", rt);
 
-              const options = await parseSigningInstruction(text, totalPages);
               if (!options) {
-                await sendSlackMessage(channel, '❌ I couldn\'t understand that. Try something like "bigger, top left" or "page 2 bottom center".');
+                await sendSlackMessage(channel, '❌ I couldn\'t understand that. Try something like "bigger, top left" or "page 2 bottom center".', rt);
                 return;
               }
 
@@ -820,11 +846,12 @@ Deno.serve(async (req) => {
                 const pageLabel = options.page === totalPages - 1 && totalPages > 1 ? "last page" : `page ${options.page + 1}`;
                 const sizeLabel = options.scale;
 
-                await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${cached.file_name}`, cached.thread_ts || undefined);
-                await sendSlackMessage(channel, `✅ Re-signed — ${sizeLabel} signature, ${posLabel}, ${pageLabel}. Tell me to adjust again or upload a new PDF!`);
+                await uploadSlackFile(channel, signedPdf, signedFilename, `Signed: ${cached.file_name}`, rt);
+                if (rotation !== (cached.rotation || 0)) await supabase.from("last_signed_pdfs").update({ rotation }).eq("id", cached.id);
+                await sendSlackMessage(channel, `✅ Re-signed — ${sizeLabel} signature, ${posLabel}, ${pageLabel}${rotation ? `, rotated ${rotation}°` : ""}. Tell me to adjust again or upload a new PDF!`, rt);
               } catch (err) {
                 console.error("Re-sign error:", err);
-                await sendSlackMessage(channel, "❌ Failed to re-sign. Please try uploading the PDF again.");
+                await sendSlackMessage(channel, "❌ Failed to re-sign. Please try uploading the PDF again.", rt);
               }
             }
           }
