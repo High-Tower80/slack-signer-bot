@@ -21,6 +21,7 @@ export type Database = {
           file_name: string
           id: string
           pdf_url: string
+          rotation: number
           slack_user_id: string
           thread_ts: string | null
           updated_at: string
@@ -31,6 +32,7 @@ export type Database = {
           file_name?: string
           id?: string
           pdf_url: string
+          rotation?: number
           slack_user_id: string
           thread_ts?: string | null
           updated_at?: string
@@ -41,6 +43,7 @@ export type Database = {
           file_name?: string
           id?: string
           pdf_url?: string
+          rotation?: number
           slack_user_id?: string
           thread_ts?: string | null
           updated_at?: string
