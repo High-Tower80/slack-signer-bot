@@ -140,16 +140,28 @@ async function sendSlackMessage(channel: string, text: string, threadTs?: string
 
 const APPROVE_REACTIONS = new Set(["white_check_mark", "heavy_check_mark", "ballot_box_with_check"]);
 
+async function isTsInThread(channel: string, threadTs: string, ts: string): Promise<boolean> {
+  try {
+    const res = await fetch(`https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}&limit=200`, {
+      headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
+    });
+    const j = await res.json();
+    return (j.messages || []).some((m: any) => m.ts === ts);
+  } catch { return false; }
+}
+
 async function handleApprovalReaction(event: any) {
   if (!APPROVE_REACTIONS.has(event.reaction) || event.item?.type !== "message") return;
   const signerId = await getChannelSignerId();
   if (!signerId || event.user !== signerId) return;
   const { channel, ts } = event.item;
-  const { data: rows } = await supabase.from("pending_approvals").select("id, thread_ts")
-    .eq("channel", channel).is("approved_at", null)
-    .or(`thread_ts.eq.${ts},bot_msg_ts.eq.${ts}`);
+  const { data: rows } = await supabase.from("pending_approvals").select("id, thread_ts, bot_msg_ts")
+    .eq("channel", channel).is("approved_at", null);
   if (!rows || rows.length === 0) return;
+  // Accept a ✅ on any message in the pending thread (bot note, signed PDF, or thread root)
   for (const r of rows) {
+    const direct = r.thread_ts === ts || r.bot_msg_ts === ts;
+    if (!direct && !(await isTsInThread(channel, r.thread_ts, ts))) continue;
     await supabase.from("pending_approvals").update({ approved_at: new Date().toISOString() }).eq("id", r.id);
     await sendSlackMessage(channel, `✅ Approved by <@${signerId}>.`, r.thread_ts);
   }
