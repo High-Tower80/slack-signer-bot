@@ -163,11 +163,28 @@ async function handleApprovalReaction(event: any) {
     const direct = r.thread_ts === ts || r.bot_msg_ts === ts;
     if (!direct && !(await isTsInThread(channel, r.thread_ts, ts))) continue;
     await supabase.from("pending_approvals").update({ approved_at: new Date().toISOString() }).eq("id", r.id);
+    // Acknowledge visually: add 👀 next to the signer's ✅
+    try {
+      await fetch("https://slack.com/api/reactions.add", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, timestamp: ts, name: "eyes" }),
+      });
+    } catch { /* non-fatal */ }
     await sendSlackMessage(channel, `✅ Approved by <@${signerId}>.`, r.thread_ts);
   }
 }
 
+function isBusinessHours(): boolean {
+  // Mon–Fri, 9:00–17:59 Pacific Time (the signer's timezone)
+  const pt = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+  const day = pt.getDay();
+  if (day === 0 || day === 6) return false;
+  return pt.getHours() >= 9 && pt.getHours() < 17;
+}
+
 async function sendReminders() {
+  if (!isBusinessHours()) return 0;
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const nearlyHourAgo = new Date(Date.now() - 55 * 60 * 1000).toISOString();
   const { data: rows } = await supabase.from("pending_approvals").select("*")
