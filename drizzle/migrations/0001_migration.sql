@@ -1,0 +1,1 @@
+ALTER TABLE public.last_signed_pdfs ADD COLUMN IF NOT EXISTS rotation integer NOT NULL DEFAULT 0;
