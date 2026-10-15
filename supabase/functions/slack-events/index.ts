@@ -685,8 +685,14 @@ Deno.serve(async (req) => {
     const payload = JSON.parse(bodyText);
     console.log("Parsed payload type:", payload.type, "event type:", payload.event?.type);
 
-    // Hourly reminder trigger (idempotent: each item is reminded at most once per hour)
+    // Hourly reminder trigger — internal only: requires the shared secret header
+    // that the pg_cron job reads from the database. Not callable by the public.
     if (payload.action === "remind") {
+      const { data: secretRow } = await supabase.from("app_secrets").select("value").eq("key", "reminder_secret").maybeSingle();
+      const provided = req.headers.get("x-reminder-secret");
+      if (!secretRow?.value || !provided || provided !== secretRow.value) {
+        return new Response("Unauthorized", { status: 401 });
+      }
       const n = await sendReminders();
       return new Response(JSON.stringify({ reminded: n }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
